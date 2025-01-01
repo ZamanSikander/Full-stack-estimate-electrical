@@ -1,1 +1,4 @@
+# environment varialbe
 .env
+# node modules
+node_modules

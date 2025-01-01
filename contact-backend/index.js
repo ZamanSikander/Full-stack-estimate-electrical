@@ -3,6 +3,25 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 require("dotenv").config();
+const multer = require("multer");
+const path = require("path"); // Missing import
+const fs = require("fs");
+
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 5 * 1024 * 1024 }, // Limit file size to 5MB
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      "application/doc",
+      "application/docx",
+      "application/pdf",
+    ];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return cb(new Error("Invalid file type"), false);
+    }
+    cb(null, true);
+  },
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -12,37 +31,64 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // Email Route
-app.post("/send", async (req, res) => {
-    
+app.post("/send", upload.single("file"), async (req, res) => {
   const { name, email, message } = req.body;
-  
+  const file = req.file;
+
   if (!name || !email || !message) {
     return res.status(400).json({ error: "All fields are required" });
-    
   }
 
   try {
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST, // Hostinger SMTP server
-      port: process.env.SMTP_PORT, // Typically 587 for TLS
-      secure: true, // Use false for port 587 (TLS), true for port 465 (SSL)
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_PORT == 465,
       auth: {
-        user: process.env.EMAIL_USER, // Your email address
-        pass: process.env.EMAIL_PASS, // Your email password
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
     });
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: process.env.EMAIL_RECEIVER,
-      subject: `Contact Form Submission from ${name}`,
+      subject: `Service Request from ${name}`,
       text: `Name: ${name}\nEmail: ${email}\nMessage: ${message}`,
+      attachments: file
+        ? [
+            {
+              filename: file.originalname,
+              path: path.join(__dirname, file.path),
+            },
+          ]
+        : [],
     };
 
     await transporter.sendMail(mailOptions);
+
+    // Clean up uploaded file
+    if (file) {
+      fs.unlink(file.path, (err) => {
+        if (err) {
+          console.error("Error deleting the file:", err);
+        } else {
+          console.log("File deleted successfully");
+        }
+      });
+    }
+
     res.status(200).json({ success: "Email sent successfully" });
   } catch (error) {
-    console.error(error);
+    console.error("Error:", error);
+
+    // Clean up uploaded file in case of error
+    if (file) {
+      fs.unlink(file.path, (err) => {
+        if (err) console.error("Error deleting the file:", err);
+      });
+    }
+
     res.status(500).json({ error: "Failed to send email" });
   }
 });
